@@ -190,31 +190,31 @@
     }
 
     function renderLine(rows) {
-      // 30-Min-Buckets innerhalb der Öffnungszeiten, gemittelt über alle Wochentage.
+      // 30-Min-Buckets innerhalb der Öffnungszeiten, eine geglättete Linie pro Wochentag.
       const inRange = rows.filter(r => r.hour >= HOURS_OPEN[0] && r.hour <= HOURS_OPEN[HOURS_OPEN.length - 1]);
       const bucketKey = (r) => {
         const m = r.dt.getMinutes() < 30 ? '00' : '30';
         return `${String(r.hour).padStart(2,'0')}:${m}`;
       };
-      const byBucket = avgMap(inRange, bucketKey, r => r.frei);
-      const keys = [...byBucket.keys()].sort();
-      const y = keys.map(k => byBucket.get(k));
-      Plotly.newPlot('line', [{
-        type: 'scatter',
-        mode: 'lines+markers',
-        x: keys,
-        y,
-        line: { color: '#16a34a', shape: 'spline', smoothing: 1.3, width: 3 },
-        marker: { size: 7, color: '#16a34a' },
-        fill: 'tozeroy',
-        fillcolor: 'rgba(22, 163, 74, 0.15)',
-        hovertemplate: '%{x}<br>Ø %{y:.1f} freie Plätze<extra></extra>',
-      }], {
-        title: 'Durchschnittlicher Tagesverlauf (über alle Wochentage)',
+      const traces = WEEKDAYS.map((wd, i) => {
+        const wdRows = inRange.filter(r => r.weekday === wd);
+        const byBucket = avgMap(wdRows, bucketKey, r => r.frei);
+        const keys = [...byBucket.keys()].sort();
+        return {
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: wd,
+          x: keys,
+          y: keys.map(k => byBucket.get(k)),
+          line: { color: COLORS[i], shape: 'spline', smoothing: 1.3, width: 2.5 },
+          marker: { size: 5, color: COLORS[i] },
+        };
+      });
+      Plotly.newPlot('line', traces, {
+        title: 'Durchschnittlicher Tagesverlauf pro Wochentag',
         yaxis: { range: [0, MAX], title: 'Ø freie Plätze' },
         xaxis: { title: 'Uhrzeit' },
-        showlegend: false,
-        height: 380,
+        height: 420,
         margin: { l: 50, r: 20, t: 60, b: 60 },
       }, { displayModeBar: false, responsive: true });
     }
@@ -242,8 +242,9 @@
         texttemplate: '%{text}',
         textfont: { size: 12, color: 'black' },
         colorscale: [
-          [0, '#facc15'],   // gelb = wenig frei (voll)
-          [1, '#16a34a'],   // grün = viel frei (leer)
+          [0.0, '#eab308'],   // 0 frei (voll): dunkles Senfgelb
+          [0.6, '#facc15'],   // ~6 frei: leuchtendes Gelb — noch klar gelb
+          [1.0, '#16a34a'],   // 10 frei (leer): Grün
         ],
         zmin: 0, zmax: MAX,
         colorbar: { title: 'Ø frei' },
