@@ -31,10 +31,16 @@ def fetch_free_slots() -> int:
     driver = webdriver.Chrome(options=options)
     try:
         driver.get(URL)
-        element = WebDriverWait(driver, WAIT_SECONDS).until(
+        WebDriverWait(driver, WAIT_SECONDS).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, CSS_SELECTOR))
         )
-        return int(element.text.strip())
+        # Countee rendert den Span sofort, befüllt den Text aber asynchron via JS.
+        # Auf den nicht-leeren Text warten.
+        WebDriverWait(driver, WAIT_SECONDS).until(
+            lambda d: (d.find_element(By.CSS_SELECTOR, CSS_SELECTOR).text or "").strip().isdigit()
+        )
+        text = driver.find_element(By.CSS_SELECTOR, CSS_SELECTOR).text.strip()
+        return int(text)
     finally:
         driver.quit()
 
