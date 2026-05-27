@@ -47,13 +47,13 @@
   <p class="sub">Auto-Scraping alle 15 Min. Daten frisch via <code>raw.githubusercontent.com</code> (Cache ≤5 Min).</p>
   <div id="status" class="status">Lade Daten…</div>
 
+  <div class="card"><div id="heatmap"></div></div>
   <div class="card"><div id="gauge"></div></div>
   <div class="grid">
     <div class="card"><div id="polar"></div></div>
     <div class="card"><div id="violin"></div></div>
   </div>
   <div class="card"><div id="line"></div></div>
-  <div class="card"><div id="heatmap"></div></div>
 
   <h2 style="margin-top:2rem;">Rohdaten (letzte 20)</h2>
   <div class="card table-wrap"><table id="rawtable"></table></div>
@@ -124,33 +124,37 @@
       }], { height: 300, margin: { l: 20, r: 20, t: 60, b: 20 } }, { displayModeBar: false, responsive: true });
     }
 
+    const HOURS_OPEN = [8,9,10,11,12,13,14,15,16,17,18,19,20,21];
+
     function renderPolar(rows) {
+      const angleStep = 360 / HOURS_OPEN.length;
+      const angles = HOURS_OPEN.map((_, idx) => idx * angleStep);
       const traces = WEEKDAYS.map((wd, i) => {
         const wdRows = rows.filter(r => r.weekday === wd);
         const hourly = avgMap(wdRows, r => r.hour, r => r.frei);
-        const hours = [...Array(24).keys()];
-        const r_vals = hours.map(h => hourly.has(h) ? hourly.get(h) : null);
+        const r_vals = HOURS_OPEN.map(h => hourly.has(h) ? hourly.get(h) : null);
         return {
           type: 'scatterpolar',
           mode: 'lines',
           name: wd,
           r: [...r_vals, r_vals[0]],
-          theta: [...hours.map(h => h * 15), 0],
+          theta: [...angles, 360],
+          customdata: [...HOURS_OPEN, HOURS_OPEN[0]],
           fill: 'toself',
           opacity: 0.4,
           line: { color: COLORS[i], shape: 'spline' },
-          hovertemplate: `${wd} · %{theta}°<br>Ø %{r:.1f} frei<extra></extra>`,
+          hovertemplate: `${wd} · %{customdata}:00<br>Ø %{r:.1f} frei<extra></extra>`,
         };
       });
       Plotly.newPlot('polar', traces, {
-        title: 'Die Wellness-Uhr (Wann ist Platz?)',
+        title: 'Die Wellness-Uhr (08–21 Uhr)',
         polar: {
           bgcolor: 'rgba(240, 248, 255, 0.4)',
           radialaxis: { range: [0, MAX], visible: true, showticklabels: false, gridcolor: 'rgba(0,0,0,0.1)' },
           angularaxis: {
             tickmode: 'array',
-            tickvals: [...Array(24).keys()].map(h => h * 15),
-            ticktext: [...Array(24).keys()].map(h => `${h}:00`),
+            tickvals: angles,
+            ticktext: HOURS_OPEN.map(h => `${h}:00`),
             rotation: 90,
             direction: 'clockwise',
             gridcolor: 'rgba(0,0,0,0.1)',
@@ -186,25 +190,31 @@
     }
 
     function renderLine(rows) {
-      const traces = WEEKDAYS.map((wd, i) => {
-        const wdRows = rows.filter(r => r.weekday === wd);
-        const byHM = avgMap(wdRows, r => r.time.slice(0, 5), r => r.frei);
-        const sortedKeys = [...byHM.keys()].sort();
-        return {
-          type: 'scatter',
-          mode: 'lines+markers',
-          name: wd,
-          x: sortedKeys,
-          y: sortedKeys.map(k => byHM.get(k)),
-          line: { color: COLORS[i] },
-          marker: { size: 4 },
-        };
-      });
-      Plotly.newPlot('line', traces, {
-        title: 'Durchschnittlicher Tagesverlauf',
-        yaxis: { range: [0, MAX], title: 'Freie Plätze' },
+      // 30-Min-Buckets innerhalb der Öffnungszeiten, gemittelt über alle Wochentage.
+      const inRange = rows.filter(r => r.hour >= HOURS_OPEN[0] && r.hour <= HOURS_OPEN[HOURS_OPEN.length - 1]);
+      const bucketKey = (r) => {
+        const m = r.dt.getMinutes() < 30 ? '00' : '30';
+        return `${String(r.hour).padStart(2,'0')}:${m}`;
+      };
+      const byBucket = avgMap(inRange, bucketKey, r => r.frei);
+      const keys = [...byBucket.keys()].sort();
+      const y = keys.map(k => byBucket.get(k));
+      Plotly.newPlot('line', [{
+        type: 'scatter',
+        mode: 'lines+markers',
+        x: keys,
+        y,
+        line: { color: '#16a34a', shape: 'spline', smoothing: 1.3, width: 3 },
+        marker: { size: 7, color: '#16a34a' },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(22, 163, 74, 0.15)',
+        hovertemplate: '%{x}<br>Ø %{y:.1f} freie Plätze<extra></extra>',
+      }], {
+        title: 'Durchschnittlicher Tagesverlauf (über alle Wochentage)',
+        yaxis: { range: [0, MAX], title: 'Ø freie Plätze' },
         xaxis: { title: 'Uhrzeit' },
-        height: 420,
+        showlegend: false,
+        height: 380,
         margin: { l: 50, r: 20, t: 60, b: 60 },
       }, { displayModeBar: false, responsive: true });
     }
@@ -231,12 +241,15 @@
         y: WEEKDAYS,
         texttemplate: '%{text}',
         textfont: { size: 12, color: 'black' },
-        colorscale: 'RdYlGn',
+        colorscale: [
+          [0, '#facc15'],   // gelb = wenig frei (voll)
+          [1, '#16a34a'],   // grün = viel frei (leer)
+        ],
         zmin: 0, zmax: MAX,
         colorbar: { title: 'Ø frei' },
         hovertemplate: '%{y} · %{x}<br>Ø %{z:.1f} freie Plätze<extra></extra>',
       }], {
-        title: 'Heatmap – Ø freie Plätze (grün = leer, rot = voll)',
+        title: 'Heatmap – Ø freie Plätze (grün = leer, gelb = voll)',
         xaxis: { side: 'top' },
         yaxis: { autorange: 'reversed' },
         height: 380,
