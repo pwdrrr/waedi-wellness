@@ -54,6 +54,7 @@
     <div class="card"><div id="violin"></div></div>
   </div>
   <div class="card"><div id="line"></div></div>
+  <div class="card"><div id="heatmap-month"></div></div>
 
   <h2 style="margin-top:2rem;">Rohdaten (letzte 20)</h2>
   <div class="card table-wrap"><table id="rawtable"></table></div>
@@ -267,6 +268,59 @@
       }, { displayModeBar: false, responsive: true });
     }
 
+    const MONTHS_DE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+    function renderMonthHeatmap(rows) {
+      // Sammle eindeutige (Jahr, Monat)-Kombinationen, sortiere chronologisch.
+      const ymMap = new Map();
+      for (const r of rows) {
+        const key = r.dt.getFullYear() * 12 + r.dt.getMonth();
+        if (!ymMap.has(key)) ymMap.set(key, { year: r.dt.getFullYear(), month: r.dt.getMonth() });
+      }
+      const ymList = [...ymMap.entries()].sort((a, b) => a[0] - b[0]).map(([_, v]) => v);
+      const labels = ymList.map(({ year, month }) => `${MONTHS_DE[month]} ${year}`);
+      const presentHours = [...new Set(rows.map(r => r.hour))].sort((a, b) => a - b);
+
+      const z = [], text = [];
+      for (const { year, month } of ymList) {
+        const zRow = [], tRow = [];
+        for (const h of presentHours) {
+          const cell = rows.filter(r =>
+            r.dt.getFullYear() === year && r.dt.getMonth() === month && r.hour === h
+          );
+          if (cell.length === 0) { zRow.push(null); tRow.push(''); }
+          else {
+            const avg = cell.reduce((s, r) => s + r.frei, 0) / cell.length;
+            zRow.push(avg); tRow.push(avg.toFixed(1));
+          }
+        }
+        z.push(zRow); text.push(tRow);
+      }
+
+      Plotly.newPlot('heatmap-month', [{
+        type: 'heatmap',
+        z, text,
+        x: presentHours.map(h => `${String(h).padStart(2,'0')}:00`),
+        y: labels,
+        texttemplate: '%{text}',
+        textfont: { size: 12, color: 'black' },
+        colorscale: [
+          [0.0, '#eab308'],
+          [0.6, '#facc15'],
+          [1.0, '#16a34a'],
+        ],
+        zmin: 0, zmax: MAX,
+        colorbar: { title: 'Ø frei' },
+        hovertemplate: '%{y} · %{x}<br>Ø %{z:.1f} freie Plätze<extra></extra>',
+      }], {
+        title: 'Heatmap pro Monat – Ø freie Plätze',
+        xaxis: { side: 'top' },
+        yaxis: { autorange: 'reversed' },
+        height: Math.max(220, labels.length * 42 + 140),
+        margin: { l: 120, r: 20, t: 90, b: 20 },
+      }, { displayModeBar: false, responsive: true });
+    }
+
     function renderTable(rows) {
       const last = rows.slice(-20).reverse();
       const tbl = document.getElementById('rawtable');
@@ -291,6 +345,7 @@
         renderViolin(rows);
         renderLine(rows);
         renderHeatmap(rows);
+        renderMonthHeatmap(rows);
         renderTable(rows);
       } catch (e) {
         setStatus('Fehler: ' + e.message, 'error');
