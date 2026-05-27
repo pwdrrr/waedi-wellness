@@ -26,6 +26,20 @@
       gap: 1rem;
     }
     @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .rotate-hint {
+      display: none;
+      background: #fef3c7;
+      color: #854d0e;
+      padding: .65rem .9rem;
+      border-radius: 6px;
+      font-size: .9rem;
+      margin-bottom: 1rem;
+      text-align: center;
+      border: 1px solid #fde68a;
+    }
+    @media (max-width: 800px) and (orientation: portrait) {
+      .rotate-hint { display: block; }
+    }
     .card {
       background: white;
       border-radius: 8px;
@@ -45,6 +59,7 @@
 <body>
   <h1>🏊‍♂️ Wellness Wädenswil – Auslastung</h1>
   <p class="sub">Auto-Scraping alle 15 Min. Daten frisch via <code>raw.githubusercontent.com</code> (Cache ≤5 Min).</p>
+  <div class="rotate-hint">📱➡️🔄 Tipp: Handy ins Querformat drehen — die Heatmaps sind so viel lesbarer.</div>
   <div id="status" class="status">Lade Daten…</div>
 
   <div class="card"><div id="heatmap"></div></div>
