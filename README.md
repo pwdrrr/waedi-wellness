@@ -16,7 +16,8 @@ Vollautomatisches Dashboard für die Countee-Auslastungszahl.
 
 - **Keine laufenden Prozesse** – Scraping nur 15× pro Stunde via Actions, Dashboard ist statisches HTML.
 - **Daten frisch** – Browser fetcht CSV bei jedem Page-Load direkt von GitHub.
-- **Keine manuelle Arbeit** – Bot scrapt, committet, Netlify hostet ewig dieselbe HTML.
+- **Volle Automatik** – Bot scrapt, committet, Code-Push triggert Netlify-Deploy via Action (Secrets: `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`).
+- **Live**: https://waedi-wellness.netlify.app
 
 ## Lokal scraper-testen
 
