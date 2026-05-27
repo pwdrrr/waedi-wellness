@@ -1,26 +1,33 @@
 # Wellness Wädenswil – Auslastung
 
-Automatischer Scraper + Streamlit-Dashboard für die Countee-Auslastungszahl.
+Vollautomatisches Dashboard für die Countee-Auslastungszahl.
 
 ## Architektur
 
-- `scraper.py` – Standalone-Selenium-Script, holt aktuellen Countee-Wert und appendet ihn an `wellness_belegung_daten.csv`.
-- `.github/workflows/scrape.yml` – GitHub-Actions-Cron läuft alle 15 Min (06–20 UTC) und committet die CSV.
-- `wellness.py` – Streamlit-Dashboard. Liest die CSV direkt aus dem Repo. Hosting via Streamlit Community Cloud.
+| Komponente | Wo | Wofür |
+|---|---|---|
+| `scraper.py` | GitHub Actions | Holt alle 15 Min den aktuellen Countee-Wert (headless Chrome) |
+| `.github/workflows/scrape.yml` | GitHub Actions | Cron `*/15 6-20 * * *` UTC, committet die CSV ins Repo |
+| `wellness_belegung_daten.csv` | Repo-Root | Persistenter Speicher (Bot-committed) |
+| `index.html` | Netlify (static) | Lädt CSV via `fetch` von `raw.githubusercontent.com`, rendert Plotly.js clientside |
+| `netlify.toml` | Repo-Root | Skippt Netlify-Build bei CSV-Only-Commits (spart Free-Tier-Minuten) |
 
-## Deploy
+## Vorteile
 
-1. Repo ist auf GitHub als private Repo gepusht.
-2. Streamlit Cloud → https://share.streamlit.io → "New app" → Repo wählen → Main-File `wellness.py` → Deploy.
-3. Erste Action manuell triggern unter Actions → "Scrape Wellness" → "Run workflow".
+- **Keine laufenden Prozesse** – Scraping nur 15× pro Stunde via Actions, Dashboard ist statisches HTML.
+- **Daten frisch** – Browser fetcht CSV bei jedem Page-Load direkt von GitHub.
+- **Keine manuelle Arbeit** – Bot scrapt, committet, Netlify hostet ewig dieselbe HTML.
 
-## Lokal laufen lassen
+## Lokal scraper-testen
 
 ```bash
-pip install -r requirements.txt
-streamlit run wellness.py
-
-# oder den Scraper einmalig:
 pip install -r requirements-scraper.txt
 python scraper.py
+```
+
+## Lokal Dashboard ansehen
+
+```bash
+python -m http.server 8000
+# → http://localhost:8000
 ```

@@ -1,0 +1,8 @@
+# Rein statische Site – kein Build-Step nötig, index.html liegt im Repo-Root.
+[build]
+  publish = "."
+
+# Skippe Netlify-Build wenn der Commit nur die CSV verändert hat (Bot-Push).
+# Exit 0 = skip; non-zero (inkl. error bei initialem Commit) = build.
+[build.ignore]
+  command = "git diff --quiet HEAD^ HEAD -- . ':(exclude)wellness_belegung_daten.csv'"

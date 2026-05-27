@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Wellness Wädenswil – Auslastung</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏊</text></svg>">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 4rem;
+      color: #1a1a1a;
+      background: #fafafa;
+    }
+    h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
+    .sub { color: #666; font-size: .9rem; margin-bottom: 1.5rem; }
+    .sub code { background: #eee; padding: 1px 5px; border-radius: 3px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      padding: .5rem;
+      margin-bottom: 1rem;
+    }
+    .status { padding: .75rem 1rem; border-radius: 6px; background: #fff3cd; color: #664d03; margin-bottom: 1rem; }
+    .status.ok { background: #d1e7dd; color: #0a3622; }
+    .status.error { background: #f8d7da; color: #58151c; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { padding: .4rem .6rem; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f0f0f0; position: sticky; top: 0; }
+    .table-wrap { max-height: 400px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>🏊‍♂️ Wellness Wädenswil – Auslastung</h1>
+  <p class="sub">Auto-Scraping alle 15 Min. Daten frisch via <code>raw.githubusercontent.com</code> (Cache ≤5 Min).</p>
+  <div id="status" class="status">Lade Daten…</div>
+
+  <div class="card"><div id="gauge"></div></div>
+  <div class="grid">
+    <div class="card"><div id="polar"></div></div>
+    <div class="card"><div id="violin"></div></div>
+  </div>
+  <div class="card"><div id="line"></div></div>
+  <div class="card"><div id="heatmap"></div></div>
+
+  <h2 style="margin-top:2rem;">Rohdaten (letzte 20)</h2>
+  <div class="card table-wrap"><table id="rawtable"></table></div>
+
+  <script>
+    const CSV_URL = 'https://raw.githubusercontent.com/pwdrrr/waedi-wellness/main/wellness_belegung_daten.csv';
+    const MAX = 10;
+    const WEEKDAYS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+    const DAY_DE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+    const COLORS = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2'];
+
+    const setStatus = (msg, cls='') => {
+      const el = document.getElementById('status');
+      el.textContent = msg; el.className = 'status ' + cls;
+    };
+
+    async function loadCsv() {
+      // GitHub raw cached 5 min; busting via query won't help, akzeptieren wir.
+      const r = await fetch(CSV_URL, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status} beim Laden der CSV`);
+      const txt = await r.text();
+      const lines = txt.trim().split('\n');
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const [date, time, belegteRaw, freiRaw] = lines[i].split(',');
+        if (!date || !time) continue;
+        const dt = new Date(`${date}T${time}`);
+        if (isNaN(dt)) continue;
+        rows.push({
+          date, time,
+          dt,
+          weekday: DAY_DE[dt.getDay()],
+          hour: dt.getHours(),
+          belegte: parseInt(belegteRaw, 10),
+          frei: parseInt(freiRaw, 10),
+        });
+      }
+      return rows;
+    }
+
+    function avgMap(rows, keyFn, valFn) {
+      const acc = new Map();
+      for (const r of rows) {
+        const k = keyFn(r); const v = valFn(r);
+        if (!acc.has(k)) acc.set(k, { sum: 0, n: 0 });
+        const c = acc.get(k); c.sum += v; c.n += 1;
+      }
+      const out = new Map();
+      for (const [k, c] of acc) out.set(k, c.sum / c.n);
+      return out;
+    }
+
+    function renderGauge(latest) {
+      Plotly.newPlot('gauge', [{
+        type: 'indicator',
+        mode: 'gauge+number',
+        value: latest.frei,
+        title: { text: `Aktuell freie Plätze (Stand: ${latest.date} ${latest.time})`, font: { size: 18 } },
+        gauge: {
+          axis: { range: [0, MAX], tickwidth: 1 },
+          bar: { color: 'darkblue' },
+          steps: [
+            { range: [0, 2], color: 'red' },
+            { range: [2, 5], color: 'orange' },
+            { range: [5, 10], color: 'lightgreen' },
+          ],
+        },
+      }], { height: 300, margin: { l: 20, r: 20, t: 60, b: 20 } }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderPolar(rows) {
+      const traces = WEEKDAYS.map((wd, i) => {
+        const wdRows = rows.filter(r => r.weekday === wd);
+        const hourly = avgMap(wdRows, r => r.hour, r => r.frei);
+        const hours = [...Array(24).keys()];
+        const r_vals = hours.map(h => hourly.has(h) ? hourly.get(h) : null);
+        return {
+          type: 'scatterpolar',
+          mode: 'lines',
+          name: wd,
+          r: [...r_vals, r_vals[0]],
+          theta: [...hours.map(h => h * 15), 0],
+          fill: 'toself',
+          opacity: 0.4,
+          line: { color: COLORS[i], shape: 'spline' },
+          hovertemplate: `${wd} · %{theta}°<br>Ø %{r:.1f} frei<extra></extra>`,
+        };
+      });
+      Plotly.newPlot('polar', traces, {
+        title: 'Die Wellness-Uhr (Wann ist Platz?)',
+        polar: {
+          bgcolor: 'rgba(240, 248, 255, 0.4)',
+          radialaxis: { range: [0, MAX], visible: true, showticklabels: false, gridcolor: 'rgba(0,0,0,0.1)' },
+          angularaxis: {
+            tickmode: 'array',
+            tickvals: [...Array(24).keys()].map(h => h * 15),
+            ticktext: [...Array(24).keys()].map(h => `${h}:00`),
+            rotation: 90,
+            direction: 'clockwise',
+            gridcolor: 'rgba(0,0,0,0.1)',
+          },
+        },
+        height: 480,
+        margin: { l: 40, r: 40, t: 60, b: 40 },
+      }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderViolin(rows) {
+      const traces = WEEKDAYS.map((wd, i) => ({
+        type: 'violin',
+        name: wd,
+        orientation: 'h',
+        y: rows.filter(r => r.weekday === wd).map(() => wd),
+        x: rows.filter(r => r.weekday === wd).map(r => r.frei),
+        box: { visible: true },
+        points: 'all',
+        pointpos: 0,
+        jitter: 0.3,
+        line: { color: COLORS[i] },
+        marker: { size: 3, opacity: 0.5 },
+      }));
+      Plotly.newPlot('violin', traces, {
+        title: 'Verteilung (Wie verlässlich kriege ich einen Platz?)',
+        xaxis: { range: [-1, MAX + 1], title: 'Freie Plätze' },
+        yaxis: { categoryorder: 'array', categoryarray: WEEKDAYS.slice().reverse() },
+        showlegend: false,
+        height: 480,
+        margin: { l: 90, r: 20, t: 60, b: 40 },
+      }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderLine(rows) {
+      const traces = WEEKDAYS.map((wd, i) => {
+        const wdRows = rows.filter(r => r.weekday === wd);
+        const byHM = avgMap(wdRows, r => r.time.slice(0, 5), r => r.frei);
+        const sortedKeys = [...byHM.keys()].sort();
+        return {
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: wd,
+          x: sortedKeys,
+          y: sortedKeys.map(k => byHM.get(k)),
+          line: { color: COLORS[i] },
+          marker: { size: 4 },
+        };
+      });
+      Plotly.newPlot('line', traces, {
+        title: 'Durchschnittlicher Tagesverlauf',
+        yaxis: { range: [0, MAX], title: 'Freie Plätze' },
+        xaxis: { title: 'Uhrzeit' },
+        height: 420,
+        margin: { l: 50, r: 20, t: 60, b: 60 },
+      }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderHeatmap(rows) {
+      const presentHours = [...new Set(rows.map(r => r.hour))].sort((a, b) => a - b);
+      const z = [], text = [];
+      for (const wd of WEEKDAYS) {
+        const zRow = [], tRow = [];
+        for (const h of presentHours) {
+          const cell = rows.filter(r => r.weekday === wd && r.hour === h);
+          if (cell.length === 0) { zRow.push(null); tRow.push(''); }
+          else {
+            const avg = cell.reduce((s, r) => s + r.frei, 0) / cell.length;
+            zRow.push(avg); tRow.push(avg.toFixed(1));
+          }
+        }
+        z.push(zRow); text.push(tRow);
+      }
+      Plotly.newPlot('heatmap', [{
+        type: 'heatmap',
+        z, text,
+        x: presentHours.map(h => `${String(h).padStart(2,'0')}:00`),
+        y: WEEKDAYS,
+        texttemplate: '%{text}',
+        textfont: { size: 12, color: 'black' },
+        colorscale: 'RdYlGn',
+        zmin: 0, zmax: MAX,
+        colorbar: { title: 'Ø frei' },
+        hovertemplate: '%{y} · %{x}<br>Ø %{z:.1f} freie Plätze<extra></extra>',
+      }], {
+        title: 'Heatmap – Ø freie Plätze (grün = leer, rot = voll)',
+        xaxis: { side: 'top' },
+        yaxis: { autorange: 'reversed' },
+        height: 380,
+        margin: { l: 90, r: 20, t: 90, b: 20 },
+      }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderTable(rows) {
+      const last = rows.slice(-20).reverse();
+      const tbl = document.getElementById('rawtable');
+      tbl.innerHTML = `
+        <thead><tr><th>Datum</th><th>Uhrzeit</th><th>Wochentag</th><th>Belegt</th><th>Frei</th></tr></thead>
+        <tbody>${last.map(r => `
+          <tr><td>${r.date}</td><td>${r.time}</td><td>${r.weekday}</td><td>${r.belegte}</td><td>${r.frei}</td></tr>
+        `).join('')}</tbody>`;
+    }
+
+    (async () => {
+      try {
+        const rows = await loadCsv();
+        if (rows.length === 0) {
+          setStatus('CSV ist leer – noch keine Daten.', 'error');
+          return;
+        }
+        const latest = rows[rows.length - 1];
+        setStatus(`${rows.length.toLocaleString('de-CH')} Messpunkte · letzter Stand ${latest.date} ${latest.time} (${latest.frei}/${MAX} frei)`, 'ok');
+        renderGauge(latest);
+        renderPolar(rows);
+        renderViolin(rows);
+        renderLine(rows);
+        renderHeatmap(rows);
+        renderTable(rows);
+      } catch (e) {
+        setStatus('Fehler: ' + e.message, 'error');
+        console.error(e);
+      }
+    })();
+  </script>
+</body>
+</html>
