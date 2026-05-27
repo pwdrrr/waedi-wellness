@@ -190,11 +190,14 @@
     }
 
     function renderLine(rows) {
-      // 30-Min-Buckets innerhalb der Öffnungszeiten, eine geglättete Linie pro Wochentag.
-      const inRange = rows.filter(r => r.hour >= HOURS_OPEN[0] && r.hour <= HOURS_OPEN[HOURS_OPEN.length - 1]);
+      // 30-Min-Buckets, x-Achse als echte Time-Axis damit die Reihenfolge sauber ist.
+      const firstHour = HOURS_OPEN[0];                       // 8
+      const lastHour = HOURS_OPEN[HOURS_OPEN.length - 1];    // 21
+      const inRange = rows.filter(r => r.hour >= firstHour && r.hour <= lastHour);
       const bucketKey = (r) => {
-        const m = r.dt.getMinutes() < 30 ? '00' : '30';
-        return `${String(r.hour).padStart(2,'0')}:${m}`;
+        const m = r.dt.getMinutes() < 30 ? 0 : 30;
+        // Wir verwenden ein Dummy-Datum, damit Plotly eine kontinuierliche Time-Axis baut.
+        return `1970-01-01 ${String(r.hour).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
       };
       const traces = WEEKDAYS.map((wd, i) => {
         const wdRows = inRange.filter(r => r.weekday === wd);
@@ -213,7 +216,13 @@
       Plotly.newPlot('line', traces, {
         title: 'Durchschnittlicher Tagesverlauf pro Wochentag',
         yaxis: { range: [0, MAX], title: 'Ø freie Plätze' },
-        xaxis: { title: 'Uhrzeit' },
+        xaxis: {
+          type: 'date',
+          range: ['1970-01-01 08:00', '1970-01-01 21:00'],
+          tickformat: '%H:%M',
+          dtick: 3600000,   // 1 Stunde in ms
+          title: 'Uhrzeit',
+        },
         height: 420,
         margin: { l: 50, r: 20, t: 60, b: 60 },
       }, { displayModeBar: false, responsive: true });
