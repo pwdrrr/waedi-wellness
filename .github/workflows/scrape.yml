@@ -30,11 +30,6 @@ jobs:
           cache: 'pip'
           cache-dependency-path: requirements-scraper.txt
 
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: stable
-
       - name: Install deps
         run: pip install -r requirements-scraper.txt
 

@@ -1,80 +1,86 @@
-"""Hole den aktuellen Countee-Wert für das Wellness Wädenswil und appende ihn an die CSV.
+"""Hole den aktuellen Belegungs-Wert für das Wellness Wädenswil via Countee API.
 
-Läuft als Standalone-Script (z.B. via GitHub Actions Cron). Keine Streamlit-Imports.
+Vorher: Selenium + Headless Chrome → fragil, weil Countee-CSS-Klassen gehashed sind.
+Jetzt: direkter JSON-API-Call. Robust, schnell, ohne Browser.
 """
+import json
 import os
 import sys
+import urllib.request
+import urllib.error
 from datetime import datetime
 
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 
-URL = "https://www.countee.ch/app/de/counter/view/c5f646119aec21"
+API_URL = "https://www.startupuniverse.ch/api/1.1/de/counters/get/c5f646119aec21"
 DATA_FILE = "wellness_belegung_daten.csv"
-MAX_PERSONEN = 10
-CSS_SELECTOR = "span.counter-val-themeable"
-WAIT_SECONDS = 20
+MAX_PERSONEN_FALLBACK = 10
+TIMEOUT = 20
 
 
-def fetch_free_slots() -> int:
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,800")
-
-    driver = webdriver.Chrome(options=options)
-    try:
-        driver.get(URL)
-        WebDriverWait(driver, WAIT_SECONDS).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, CSS_SELECTOR))
-        )
-        # Countee rendert den Span sofort, befüllt den Text aber asynchron via JS.
-        # Auf den nicht-leeren Text warten.
-        WebDriverWait(driver, WAIT_SECONDS).until(
-            lambda d: (d.find_element(By.CSS_SELECTOR, CSS_SELECTOR).text or "").strip().isdigit()
-        )
-        text = driver.find_element(By.CSS_SELECTOR, CSS_SELECTOR).text.strip()
-        return int(text)
-    finally:
-        driver.quit()
+def fetch_counter() -> dict:
+    req = urllib.request.Request(
+        API_URL,
+        headers={
+            "User-Agent": "waedi-wellness-scraper/2.0 (+https://github.com/pwdrrr/waedi-wellness)",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return json.load(resp)
 
 
-def append_row(free_slots: int) -> None:
-    free_slots = max(0, min(free_slots, MAX_PERSONEN))
-    belegte = MAX_PERSONEN - free_slots
+def append_row(freie_plaetze: int, max_p: int) -> None:
+    freie_plaetze = max(0, min(freie_plaetze, max_p))
+    belegte = max_p - freie_plaetze
     now = datetime.now()
     row = pd.DataFrame({
         "Datum": [now.strftime("%Y-%m-%d")],
         "Uhrzeit": [now.strftime("%H:%M:%S")],
         "Belegte Plätze": [belegte],
-        "Freie Plätze": [free_slots],
+        "Freie Plätze": [freie_plaetze],
     })
     if not os.path.exists(DATA_FILE):
         row.to_csv(DATA_FILE, index=False)
     else:
         row.to_csv(DATA_FILE, mode="a", header=False, index=False)
-    print(f"OK: {now.isoformat(timespec='seconds')} → {free_slots} frei / {belegte} belegt")
+    print(f"OK: {now.isoformat(timespec='seconds')} → {freie_plaetze} frei / {belegte} belegt (max {max_p})")
 
 
 def main() -> int:
     try:
-        free = fetch_free_slots()
-    except TimeoutException:
-        print("WARN: Timeout beim Laden des Countee-Werts – überspringe diesen Tick.", file=sys.stderr)
+        data = fetch_counter()
+    except (urllib.error.URLError, TimeoutError) as e:
+        print(f"WARN: API-Call fehlgeschlagen ({e}) – überspringe diesen Tick.", file=sys.stderr)
         return 0
-    except ValueError as e:
-        print(f"WARN: Wert nicht parsbar ({e}) – überspringe diesen Tick.", file=sys.stderr)
-        return 0
-    except Exception as e:
-        print(f"ERROR: Unerwarteter Fehler beim Scraping: {e}", file=sys.stderr)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: API lieferte kein JSON: {e}", file=sys.stderr)
         return 1
-    append_row(free)
+
+    try:
+        d = data["response"]["data"]
+        closed = int(d.get("closed", 0))
+        max_p = int(d.get("max", MAX_PERSONEN_FALLBACK))
+        items = d.get("counteritems", [])
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"ERROR: Unerwartete API-Struktur: {e}\nRaw: {data!r}", file=sys.stderr)
+        return 1
+
+    if closed:
+        print("INFO: Wellness ist geschlossen – kein Eintrag.")
+        return 0
+    if not items:
+        print("WARN: Offen, aber keine counteritems – überspringe.", file=sys.stderr)
+        return 0
+
+    try:
+        val = int(items[0]["val"])
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"ERROR: counteritems[0].val nicht parsbar: {e}", file=sys.stderr)
+        return 1
+
+    # mode_display = "available" → val ist die Zahl der freien Plätze.
+    append_row(val, max_p)
     return 0
 
 
